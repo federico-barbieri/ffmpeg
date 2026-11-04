@@ -21,18 +21,20 @@ export function sizeChange(outBytes: number, inBytes: number): string {
 
 export function ResultCard({ result, url, inputSize, command, showCommand, onToggleCommand, onReuse }: Props) {
   const { blob, outputName } = result
+  const isZip = blob.type === 'application/zip'
   return (
     <div className="result">
       <div>
         <strong className="filename">{outputName}</strong>
-        <div className="muted">{formatSize(blob.size)} · {sizeChange(blob.size, inputSize)}</div>
+        <div className="muted">{formatSize(blob.size)}{!isZip && ` · ${sizeChange(blob.size, inputSize)}`}</div>
       </div>
+      {isZip && <div className="zip">📦 {result.count ?? ''} pictures inside this ZIP file</div>}
       {blob.type.startsWith('audio/') && <audio controls src={url} />}
       {blob.type.startsWith('video/') && <video controls src={url} />}
       {blob.type.startsWith('image/') && <img src={url} alt="Result preview" />}
       <div className="actions">
         <a className="download" href={url} download={outputName}>Download</a>
-        <button type="button" className="secondary" onClick={onReuse}>Do something else with this file</button>
+        {!isZip && <button type="button" className="secondary" onClick={onReuse}>Do something else with this file</button>}
       </div>
       <CommandPreview command={command} open={showCommand} onToggle={onToggleCommand} />
     </div>

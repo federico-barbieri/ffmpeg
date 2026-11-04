@@ -54,4 +54,20 @@ export const toGif: Feature = {
   ],
 }
 
-export const convertFeatures: Feature[] = [toMp4, toGif]
+// VP8, not VP9: libvpx-vp9 crashes ("memory access out of bounds") in the single-threaded ffmpeg.wasm core.
+export const toWebm: Feature = {
+  id: 'to-webm',
+  label: 'Convert to WebM',
+  group: 'Convert',
+  icon: '🌐',
+  description: 'Turn a video into a WebM file, a format made for websites.',
+  accepts: 'video',
+  reencodes: true,
+  options: [],
+  outputName: (name) => (extOf(name) === 'webm' ? `${baseName(name)}-converted.webm` : `${baseName(name)}.webm`),
+  buildArgs: (input, output) => [
+    '-i', input, '-c:v', 'libvpx', '-crf', '10', '-b:v', '1M', '-pix_fmt', 'yuv420p', '-c:a', 'libvorbis', output,
+  ],
+}
+
+export const convertFeatures: Feature[] = [toMp4, toWebm, toGif]

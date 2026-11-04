@@ -24,16 +24,27 @@ npm run preview    # serve the production build locally
 The FFmpeg core (about 30 MB) is bundled from the `@ffmpeg/core` package and served from your own
 origin, so there is no CDN call. It downloads once, the first time a file is chosen or a button is clicked.
 
-## Buttons (Phase 1)
+## Buttons
 
 | Group | Buttons |
 |---|---|
-| Convert | Convert to MP4, Make a GIF |
-| Audio | Extract audio (MP3), Remove audio |
-| Edit | Trim (fast or precise), Rotate / flip |
+| Convert | Convert to MP4, Convert to WebM, Make a GIF |
+| Audio | Extract audio (MP3), Remove audio, Normalize volume |
+| Edit | Merge clips, Trim (fast or precise), Change speed, Crop, Add watermark, Rotate / flip |
 | Size & quality | Compress, Resize |
-| Images | Take screenshot |
+| Images | Take screenshot, Thumbnail sheet (ZIP), Slideshow |
 | Info | File info |
+
+A few of these work a little differently:
+
+- **Merge clips** and **Slideshow** take several files. Add them below the options, reorder with the arrows.
+  Merge first checks the clips; if they all match (same codecs, size, frame rate and sound format) it joins
+  them without re-encoding, otherwise it re-encodes and fits every clip to the first clip's size.
+- **Crop** shows a frame of your video; drag on it to choose the area (drag inside to move it, drag a corner
+  to resize). The numbers underneath can be typed by hand too.
+- **Add watermark** takes a second, separate file (your logo) and sizes it as a share of the video width.
+- **Thumbnail sheet** saves one picture every N seconds (at most 120) and returns them as one ZIP file.
+- **Change speed** handles 0.25× and 4× too (audio speed filters are chained, since one filter only does 0.5–2×).
 
 Buttons that do not fit the chosen file (for example video-only buttons on an MP3) are greyed out, with a
 tooltip saying why.
@@ -102,6 +113,13 @@ output name from its defaults).
 Set `reencodes: true` on a feature that re-encodes video so the app shows a time estimate for it, and
 `noOutput: true` for a feature that only reads the file's log.
 
+Features that need more than one input use a few more optional fields: `multiFile` (+ `minFiles`) for a
+reorderable list of files, `extraInput` for one separate extra file, `picker: 'crop'` for the crop rectangle,
+`needsInfo` to have every input probed first (results arrive in the `ctx` argument of `buildArgs`),
+`sideFiles` for helper text files such as a concat list, and `zipOutput` for a numbered image sequence that
+is returned as a ZIP. See `src/features/merge.ts` and `src/features/images.ts` for working examples. If the
+arguments cannot be built from what the user picked, throw a `UserError` with a plain-English message.
+
 ## Limitations
 
 - **File size.** ffmpeg.wasm is 32-bit. The app warns above 1 GB and refuses above 2 GB; large files may
@@ -112,11 +130,14 @@ Set `reencodes: true` on a feature that re-encodes video so the app shows a time
 - **Trim, fast mode** cuts at the nearest keyframe, so the start can be a moment early. Use "Precise".
 - **Single-threaded core** for now. A multi-threaded core needs `SharedArrayBuffer`, which requires
   COOP/COEP headers (planned, see Phase 3 in `CLAUDE.md`).
-- **Codecs.** The wasm build has x264, VP8/VP9, MP3, Opus and Vorbis, but not every format ever made.
+- **WebM is VP8 only.** VP9 encoding crashes ("memory access out of bounds") in the single-threaded
+  ffmpeg.wasm core, whatever the input or settings, so the button uses VP8.
+- **Codecs.** The wasm build has x264, VP8, MP3, Opus and Vorbis, but not every format ever made.
+- **Merge** needs all clips to be the same kind (all video, or all audio).
 - If the FFmpeg worker fails to load in dev, make sure `@ffmpeg/ffmpeg` and `@ffmpeg/util` stay in
   `optimizeDeps.exclude` in `vite.config.ts` (already set).
 
 ## Roadmap
 
-Phase 2 (merge, speed, normalize, WebM, crop, watermark, thumbnail sheet, slideshow) and Phase 3
-(multi-threading, batch mode, burned-in subtitles, remembered options) are described in `CLAUDE.md`.
+Phases 1 and 2 are done. Phase 3 (multi-threading, batch mode, burned-in subtitles, remembered options)
+is described in `CLAUDE.md`.

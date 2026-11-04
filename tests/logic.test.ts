@@ -82,6 +82,6 @@ describe('willReencode', () => {
   })
   it('flags the slow video features', () => {
     const slow = features.filter((f) => willReencode(f, defaultValues(f.options))).map((f) => f.id)
-    expect(slow.sort()).toEqual(['compress', 'resize', 'rotate', 'to-mp4'])
+    expect(slow.sort()).toEqual(['compress', 'crop', 'resize', 'rotate', 'speed', 'to-mp4', 'to-webm', 'watermark'])
   })
 })

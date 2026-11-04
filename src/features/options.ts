@@ -12,7 +12,8 @@ export function validateOption(def: OptionDef, value: string | number | undefine
     return typeof value === 'string' && TIME_RE.test(value.trim()) ? null : 'Use a time like 1:30 or 00:01:30'
   }
   if (def.kind === 'number' || def.kind === 'slider') {
-    return typeof value === 'number' && Number.isFinite(value) ? null : 'Enter a number'
+    if (typeof value !== 'number' || !Number.isFinite(value)) return 'Enter a number'
+    if (def.kind === 'number' && def.min !== undefined && value < def.min) return `Must be at least ${def.min}`
   }
   return null
 }

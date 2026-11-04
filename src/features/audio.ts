@@ -26,4 +26,17 @@ export const removeAudio: Feature = {
   buildArgs: (input, output) => ['-i', input, '-an', '-c:v', 'copy', output],
 }
 
-export const audioFeatures: Feature[] = [extractAudio, removeAudio]
+export const normalize: Feature = {
+  id: 'normalize',
+  label: 'Normalize volume',
+  group: 'Audio',
+  icon: '📢',
+  description: 'Even out the loudness so quiet parts are easier to hear and loud parts are not too loud.',
+  accepts: 'media',
+  options: [],
+  outputName: (name) => `${baseName(name)}-normalized.${extOf(name) || 'mp4'}`,
+  // loudnorm resamples to 192 kHz internally, so set a normal rate; the picture is copied untouched.
+  buildArgs: (input, output) => ['-i', input, '-af', 'loudnorm', '-ar', '48000', '-c:v', 'copy', output],
+}
+
+export const audioFeatures: Feature[] = [extractAudio, removeAudio, normalize]

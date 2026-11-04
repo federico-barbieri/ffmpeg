@@ -22,7 +22,9 @@ describe('registry', () => {
     for (const f of features) {
       const out = f.outputName('holiday.mp4')
       expect(out).toMatch(/\.\w+$/)
-      const args = f.buildArgs('input.mp4', 'output.x', defaultValues(f.options))
+      const args = f.buildArgs('input.mp4', 'output.x', defaultValues(f.options), {
+        inputs: ['input.mp4', 'input2.mp4'], extra: 'logo.png',
+      })
       expect(args.length).toBeGreaterThan(0)
       expect(args.every((a) => typeof a === 'string')).toBe(true)
     }
