@@ -3,6 +3,7 @@ import { baseName } from './util'
 
 export const compress: Feature = {
   id: 'compress',
+  reencodes: true,
   label: 'Compress',
   group: 'Size & quality',
   icon: '🗜️',
@@ -19,6 +20,7 @@ export const compress: Feature = {
 
 export const resize: Feature = {
   id: 'resize',
+  reencodes: true,
   label: 'Resize',
   group: 'Size & quality',
   icon: '📐',

@@ -1,5 +1,6 @@
 import { firstError, validateOption } from '../features/options'
 import type { Feature, OptionDef, OptionValues } from '../features/types'
+import { CommandPreview } from './CommandPreview'
 
 interface Props {
   feature: Feature
@@ -7,6 +8,10 @@ interface Props {
   disabled?: boolean
   onChange: (values: OptionValues) => void
   onRun: () => void
+  command: string
+  showCommand: boolean
+  onToggleCommand: () => void
+  estimate?: string // shown for slow re-encoding features
 }
 
 function Field({ def, value, onChange }: { def: OptionDef; value: string | number; onChange: (v: string | number) => void }) {
@@ -43,7 +48,7 @@ function Field({ def, value, onChange }: { def: OptionDef; value: string | numbe
   )
 }
 
-export function OptionsPanel({ feature, values, disabled, onChange, onRun }: Props) {
+export function OptionsPanel({ feature, values, disabled, onChange, onRun, command, showCommand, onToggleCommand, estimate }: Props) {
   const error = firstError(feature.options, values)
   return (
     <form className="options" onSubmit={(e) => { e.preventDefault(); if (!error && !disabled) onRun() }}>
@@ -52,7 +57,9 @@ export function OptionsPanel({ feature, values, disabled, onChange, onRun }: Pro
       {feature.options.map((def) => (
         <Field key={def.key} def={def} value={values[def.key]} onChange={(v) => onChange({ ...values, [def.key]: v })} />
       ))}
+      {estimate && <div className="muted">Estimated time: {estimate}. This runs inside your browser, so it is slower than the FFmpeg app.</div>}
       <button type="submit" className="run" disabled={disabled || error !== null}>Run</button>
+      {!error && <CommandPreview command={command} open={showCommand} onToggle={onToggleCommand} />}
     </form>
   )
 }

@@ -1,69 +1,113 @@
-import { useEffect, useState } from 'react'
-import { DropZone, formatSize } from './components/DropZone'
-import { ProgressBar } from './components/ProgressBar'
+import { useEffect, useRef, useState } from 'react'
 import { ButtonGrid } from './components/ButtonGrid'
+import { DropZone } from './components/DropZone'
+import { InfoCard } from './components/InfoCard'
 import { OptionsPanel } from './components/OptionsPanel'
+import { ProgressBar } from './components/ProgressBar'
+import { ResultCard } from './components/ResultCard'
+import { defaultValues, firstError } from './features/options'
 import { features } from './features/registry'
-import { defaultValues } from './features/options'
+import { willReencode, type Feature, type OptionValues } from './features/types'
+import { commandString } from './ffmpeg/command'
 import { CancelledError, EngineError, cancel, probe, run, type RunResult } from './ffmpeg/engine'
-import { parseInfo, summarize, toRows, type MediaInfo } from './ffmpeg/probe'
-import type { Feature, OptionValues } from './features/types'
+import { friendlyError } from './ffmpeg/errors'
+import { estimateSeconds, formatEstimate } from './ffmpeg/estimate'
+import { parseInfo, summarize, type MediaInfo } from './ffmpeg/probe'
+import { checkSize } from './limits'
 
 type State =
   | { phase: 'idle' }
   | { phase: 'loading' }
   | { phase: 'running'; progress: number | null }
-  | { phase: 'done'; result: RunResult; url: string }
+  | { phase: 'done'; result: RunResult & { blob: Blob }; url: string; command: string; inputSize: number }
   | { phase: 'info'; info: MediaInfo | null; log: string[] }
   | { phase: 'error'; message: string; log: string[] }
 
+interface Job { startedAt: number; estimate?: string }
+
 export default function App() {
   const [file, setFile] = useState<File | null>(null)
+  const [fileInfo, setFileInfo] = useState<MediaInfo | null>(null)
   const [state, setState] = useState<State>({ phase: 'idle' })
   const [selected, setSelected] = useState<Feature | null>(null)
   const [values, setValues] = useState<OptionValues>({})
-  const [summary, setSummary] = useState('')
   const [probing, setProbing] = useState(false)
+  const [notice, setNotice] = useState<{ level: 'warn' | 'refuse'; message: string } | null>(null)
+  const [showCommand, setShowCommand] = useState(false)
+  const [job, setJob] = useState<Job | null>(null)
+  const top = useRef<HTMLHeadingElement>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
+  const statusRef = useRef<HTMLDivElement>(null)
   const working = probing || state.phase === 'loading' || state.phase === 'running'
 
-  /** Read duration/resolution of a newly chosen file (best effort: failures are silent). */
+  // Free the previous result's blob URL whenever the state moves on.
+  useEffect(() => () => { if (state.phase === 'done') URL.revokeObjectURL(state.url) }, [state])
+
+  // On small screens the options panel / results are below the fold: bring them into view.
+  useEffect(() => {
+    if (selected && selected.options.length > 0) panelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+  }, [selected])
+  useEffect(() => {
+    if (state.phase !== 'idle') statusRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+  }, [state.phase])
+
+  /** Accept a file (size-checked), then read its duration/resolution. Probe failures are silent. */
   async function choose(f: File) {
+    const size = checkSize(f.size)
+    if (size.level === 'refuse') return setNotice(size) // keep the previous file, if any
+    setNotice(size.level === 'warn' ? size : null)
     setFile(f)
-    setSummary('')
+    setFileInfo(null)
     setState({ phase: 'idle' })
     setProbing(true)
     try {
-      const info = parseInfo(await probe(f, () => setState({ phase: 'loading' })))
-      setSummary(info ? summarize(info) : '')
+      const info = parseInfo(await probe(f, {
+        onLoading: () => setState({ phase: 'loading' }),
+        onLoaded: () => setState({ phase: 'idle' }),
+      }))
+      setFileInfo(info)
     } catch { /* the buttons still work; the summary is a nice-to-have */ }
     setState((s) => (s.phase === 'loading' ? { phase: 'idle' } : s))
     setProbing(false)
   }
 
-  useEffect(() => () => { if (state.phase === 'done') URL.revokeObjectURL(state.url) }, [state])
-
   async function start(feature: Feature, opts: OptionValues) {
     if (!file) return
-    setState({ phase: 'loading' })
+    const seconds = willReencode(feature, opts) ? estimateSeconds(fileInfo) : null
+    setJob({ startedAt: Date.now(), estimate: seconds === null ? undefined : formatEstimate(seconds) })
+    setState({ phase: 'running', progress: null }) // indeterminate until real progress arrives
+    const command = commandString(feature, file.name, opts)
     try {
-      const result = await run(
-        feature, file, opts,
-        (p) => setState({ phase: 'running', progress: p }),
-        () => setState({ phase: 'loading' }),
-      )
+      const result = await run(feature, file, opts, {
+        onProgress: (p) => setState({ phase: 'running', progress: p }),
+        onLoading: () => setState({ phase: 'loading' }),
+        onLoaded: () => setState({ phase: 'running', progress: null }),
+      })
       if (!result.blob) return setState({ phase: 'info', info: parseInfo(result.log), log: result.log })
-      setState({ phase: 'done', result, url: URL.createObjectURL(result.blob) })
+      setState({ phase: 'done', result: { ...result, blob: result.blob }, url: URL.createObjectURL(result.blob), command, inputSize: file.size })
     } catch (e) {
       if (e instanceof CancelledError) return setState({ phase: 'idle' })
       const log = e instanceof EngineError ? e.log : []
-      setState({ phase: 'error', message: e instanceof Error ? e.message : String(e), log })
+      setState({ phase: 'error', message: friendlyError(e instanceof Error ? e.message : String(e), log), log })
     }
   }
 
+  function reuse() {
+    if (state.phase !== 'done') return
+    const { blob, outputName } = state.result
+    setSelected(null)
+    choose(new File([blob], outputName, { type: blob.type }))
+    top.current?.scrollIntoView({ behavior: 'smooth' })
+  }
+
+  const optionError = selected ? firstError(selected.options, values) : null
+  const previewEstimate = selected && willReencode(selected, values) ? estimateSeconds(fileInfo) : null
+
   return (
     <main>
-      <h1>FFmpeg Buttons</h1>
-      <DropZone file={file} onFile={choose} disabled={working} summary={summary} />
+      <h1 ref={top}>FFmpeg Buttons</h1>
+      <DropZone file={file} onFile={choose} disabled={working} summary={fileInfo ? summarize(fileInfo) : ''} />
+      {notice && <div className={`notice ${notice.level}`} role="alert">{notice.message}</div>}
 
       <ButtonGrid
         features={features}
@@ -79,39 +123,47 @@ export default function App() {
         }}
       />
 
-      {selected && selected.options.length > 0 && (
-        <OptionsPanel feature={selected} values={values} disabled={working} onChange={setValues} onRun={() => start(selected, values)} />
+      <div ref={panelRef} className="slot">
+      {selected && file && selected.options.length > 0 && (
+        <OptionsPanel
+          feature={selected}
+          values={values}
+          disabled={working}
+          onChange={setValues}
+          onRun={() => start(selected, values)}
+          command={optionError ? '' : commandString(selected, file.name, values)}
+          showCommand={showCommand}
+          onToggleCommand={() => setShowCommand((v) => !v)}
+          estimate={previewEstimate === null ? undefined : formatEstimate(previewEstimate)}
+        />
       )}
+      </div>
+
+      <div ref={statusRef} className="status">
 
       {state.phase === 'loading' && <ProgressBar value={null} label="Loading FFmpeg… (~30 MB, once)" onCancel={cancel} />}
-      {state.phase === 'running' && <ProgressBar value={state.progress} onCancel={cancel} />}
+      {state.phase === 'running' && (
+        <ProgressBar value={state.progress} estimate={job?.estimate} startedAt={job?.startedAt} onCancel={cancel} />
+      )}
       {state.phase === 'error' && (
-        <div className="error">
-          <p>Something went wrong: {state.message}</p>
-          <details><summary>Technical details</summary><pre>{state.log.join('\n')}</pre></details>
+        <div className="error" role="alert">
+          <p>{state.message}</p>
+          <details><summary>Technical details</summary><pre>{state.log.join('\n') || 'No log available.'}</pre></details>
         </div>
       )}
-      {state.phase === 'info' && (
-        <div className="result">
-          {state.info ? (
-            <table className="info">
-              <tbody>{toRows(state.info).map(([k, v]) => <tr key={k}><th>{k}</th><td>{v}</td></tr>)}</tbody>
-            </table>
-          ) : (
-            <p>This file seems damaged or isn't a video, audio or image file.</p>
-          )}
-          <details><summary>Technical details</summary><pre>{state.log.join('\n')}</pre></details>
-        </div>
+      {state.phase === 'info' && <InfoCard info={state.info} log={state.log} />}
+      {state.phase === 'done' && (
+        <ResultCard
+          result={state.result}
+          url={state.url}
+          inputSize={state.inputSize}
+          command={state.command}
+          showCommand={showCommand}
+          onToggleCommand={() => setShowCommand((v) => !v)}
+          onReuse={reuse}
+        />
       )}
-      {state.phase === 'done' && state.result.blob && (
-        <div className="result">
-          <strong>{state.result.outputName}</strong> · {formatSize(state.result.blob.size)}
-          {state.result.blob.type.startsWith('audio/') && <audio controls src={state.url} />}
-          {state.result.blob.type.startsWith('video/') && <video controls src={state.url} />}
-          {state.result.blob.type.startsWith('image/') && <img src={state.url} alt="Result preview" />}
-          <a className="download" href={state.url} download={state.result.outputName}>Download</a>
-        </div>
-      )}
+      </div>
     </main>
   )
 }

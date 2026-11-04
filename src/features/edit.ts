@@ -11,6 +11,7 @@ function reencodeFlags(output: string): string[] {
 
 export const trim: Feature = {
   id: 'trim',
+  reencodes: (o) => o.mode === 'precise',
   label: 'Trim',
   group: 'Edit',
   icon: '✂️',
@@ -46,6 +47,7 @@ const ROTATE_FILTERS: Record<string, string> = {
 
 export const rotate: Feature = {
   id: 'rotate',
+  reencodes: true,
   label: 'Rotate / flip',
   group: 'Edit',
   icon: '🔄',

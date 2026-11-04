@@ -83,13 +83,14 @@ export function cancel(): void {
  * Run a feature on one file: write input → exec → read output → clean up.
  * Only one job at a time.
  */
-export async function run(
-  feature: Feature,
-  file: File,
-  opts: OptionValues,
-  onProgress?: (p: number) => void,
-  onLoading?: () => void,
-): Promise<RunResult> {
+export interface RunCallbacks {
+  onProgress?: (p: number) => void
+  onLoading?: () => void // ffmpeg.wasm is about to be downloaded/initialised (first use)
+  onLoaded?: () => void // ffmpeg is ready and the job starts
+}
+
+export async function run(feature: Feature, file: File, opts: OptionValues, cb: RunCallbacks = {}): Promise<RunResult> {
+  const { onProgress, onLoading, onLoaded } = cb
   if (busy) throw new Error('Another job is already running')
   busy = true
   cancelled = false
@@ -105,12 +106,14 @@ export async function run(
   try {
     if (!ffmpeg?.loaded) onLoading?.()
     ff = await getFFmpeg()
+    onLoaded?.()
     await ff.writeFile(input, await fetchFile(file))
     const code = await ff.exec(args)
     if (cancelled) throw new CancelledError()
     if (feature.noOutput) return { blob: null, log: getLog(), outputName, args } // non-zero exit is expected
     if (code !== 0) throw new EngineError(`ffmpeg exited with code ${code}`, getLog())
     const data = await ff.readFile(output)
+    if (data.length === 0) throw new EngineError('Output file is empty', getLog())
     const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : data
     // Copy into a fresh buffer: the original may be backed by memory ffmpeg is about to reuse.
     const blob = new Blob([new Uint8Array(bytes)], { type: MIME[extOf(output)] ?? 'application/octet-stream' })
@@ -118,6 +121,10 @@ export async function run(
   } catch (e) {
     if (cancelled) throw new CancelledError()
     if (e instanceof EngineError) throw e
+    // ffmpeg crashed or aborted (e.g. out of memory): its state is unreliable, so start fresh next time.
+    ffmpeg?.terminate()
+    ffmpeg = null
+    ff = null
     throw new EngineError(e instanceof Error ? e.message : String(e), getLog())
   } finally {
     // Free the virtual FS (memory is tight). Skip if the instance was terminated.
@@ -134,7 +141,8 @@ export async function run(
  * Quick look at a file (`ffmpeg -i`) and return the log. The file is mounted read-only
  * (WORKERFS) instead of copied, so even a huge file costs no memory. Counts as a job.
  */
-export async function probe(file: File, onLoading?: () => void): Promise<string[]> {
+export async function probe(file: File, cb: Pick<RunCallbacks, 'onLoading' | 'onLoaded'> = {}): Promise<string[]> {
+  const { onLoading, onLoaded } = cb
   if (busy) throw new Error('Another job is already running')
   busy = true
   cancelled = false
@@ -145,6 +153,7 @@ export async function probe(file: File, onLoading?: () => void): Promise<string[
   try {
     if (!ffmpeg?.loaded) onLoading?.()
     ff = await getFFmpeg()
+    onLoaded?.()
     await ff.createDir(dir)
     await ff.mount(FFFSType.WORKERFS, { files: [file] }, dir)
     await ff.exec(['-i', `${dir}/${file.name}`]) // exits non-zero: no output file, expected

@@ -3,6 +3,7 @@ import { baseName, extOf } from './util'
 
 export const toMp4: Feature = {
   id: 'to-mp4',
+  reencodes: true,
   label: 'Convert to MP4',
   group: 'Convert',
   icon: '🎞️',

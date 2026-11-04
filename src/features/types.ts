@@ -14,8 +14,13 @@ export interface Feature {
   description: string // one plain-English sentence
   accepts: 'video' | 'audio' | 'media' | 'images'
   multiFile?: boolean
+  reencodes?: boolean | ((opts: OptionValues) => boolean) // true if it decodes+encodes video (slow in wasm): drives the time estimate
   noOutput?: boolean // 'info': runs ffmpeg for its log only, produces no file
   options: OptionDef[]
   outputName: (inputName: string) => string // 'holiday.mp4' -> 'holiday.mp3'
   buildArgs: (input: string, output: string, opts: OptionValues) => string[]
+}
+
+export function willReencode(feature: Feature, opts: OptionValues): boolean {
+  return typeof feature.reencodes === 'function' ? feature.reencodes(opts) : feature.reencodes === true
 }
