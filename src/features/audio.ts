@@ -1,5 +1,5 @@
 import type { Feature } from './types'
-import { baseName } from './util'
+import { baseName, extOf } from './util'
 
 export const extractAudio: Feature = {
   id: 'extract-audio',
@@ -13,4 +13,17 @@ export const extractAudio: Feature = {
   buildArgs: (input, output) => ['-i', input, '-vn', '-c:a', 'libmp3lame', '-q:a', '2', output],
 }
 
-export const audioFeatures: Feature[] = [extractAudio]
+export const removeAudio: Feature = {
+  id: 'remove-audio',
+  label: 'Remove audio',
+  group: 'Audio',
+  icon: '🔇',
+  description: 'Make the video silent. The picture is not re-encoded, so this is fast and lossless.',
+  accepts: 'video',
+  options: [],
+  // same container as the input, because the video stream is copied untouched
+  outputName: (name) => `${baseName(name)}-no-audio.${extOf(name) || 'mp4'}`,
+  buildArgs: (input, output) => ['-i', input, '-an', '-c:v', 'copy', output],
+}
+
+export const audioFeatures: Feature[] = [extractAudio, removeAudio]

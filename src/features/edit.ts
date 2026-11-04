@@ -1,32 +1,73 @@
 import type { Feature } from './types'
-import { baseName } from './util'
+import { baseName, extOf } from './util'
 
-export const screenshot: Feature = {
-  id: 'screenshot',
-  label: 'Take screenshot',
-  group: 'Images',
-  icon: '📸',
-  description: 'Save a single picture from the video at a moment you choose.',
-  accepts: 'video',
-  options: [{ kind: 'time', key: 'time', label: 'At what time?', default: '00:00:01' }],
-  outputName: (name) => `${baseName(name)}.png`,
-  buildArgs: (input, output, o) => ['-ss', String(o.time).trim(), '-i', input, '-frames:v', '1', output],
+/** Codec flags for a "precise" re-encode, chosen from the output container. */
+function reencodeFlags(output: string): string[] {
+  const ext = extOf(output)
+  if (['mp4', 'mov', 'mkv', 'm4v'].includes(ext)) return ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-c:a', 'aac']
+  if (ext === 'webm') return ['-c:v', 'libvpx', '-c:a', 'libvorbis'] // VP8: VP9 is far too slow in wasm
+  return [] // audio containers etc.: ffmpeg's default encoder for the format
 }
 
-export const compress: Feature = {
-  id: 'compress',
-  label: 'Compress',
-  group: 'Size & quality',
-  icon: '🗜️',
-  description: 'Make the video file smaller by lowering its quality a little.',
+export const trim: Feature = {
+  id: 'trim',
+  label: 'Trim',
+  group: 'Edit',
+  icon: '✂️',
+  description: 'Keep only the part between a start and an end time.',
+  accepts: 'media',
+  options: [
+    { kind: 'time', key: 'start', label: 'Start', default: '00:00:00' },
+    { kind: 'time', key: 'end', label: 'End', default: '00:00:05' },
+    {
+      kind: 'select', key: 'mode', label: 'Cutting method',
+      choices: [
+        { label: 'Fast (may start a moment early)', value: 'fast' },
+        { label: 'Precise (slower, cuts exactly)', value: 'precise' },
+      ],
+      default: 'fast',
+    },
+  ],
+  outputName: (name) => `${baseName(name)}-trimmed.${extOf(name) || 'mp4'}`,
+  buildArgs: (input, output, o) => [
+    // both before -i, so END is a position in the original file
+    '-ss', String(o.start).trim(), '-to', String(o.end).trim(), '-i', input,
+    ...(o.mode === 'precise' ? reencodeFlags(output) : ['-c', 'copy']),
+    output,
+  ],
+}
+
+const ROTATE_FILTERS: Record<string, string> = {
+  cw: 'transpose=1',
+  ccw: 'transpose=2',
+  '180': 'transpose=1,transpose=1',
+  hflip: 'hflip',
+}
+
+export const rotate: Feature = {
+  id: 'rotate',
+  label: 'Rotate / flip',
+  group: 'Edit',
+  icon: '🔄',
+  description: 'Turn the video sideways or upside down, or mirror it.',
   accepts: 'video',
   options: [
-    { kind: 'slider', key: 'crf', label: 'Quality', min: 18, max: 35, step: 1, default: 28, hint: ['better quality', 'smaller file'] },
+    {
+      kind: 'select', key: 'how', label: 'How?',
+      choices: [
+        { label: '90° to the right', value: 'cw' },
+        { label: '90° to the left', value: 'ccw' },
+        { label: '180° (upside down)', value: '180' },
+        { label: 'Mirror (flip left–right)', value: 'hflip' },
+      ],
+      default: 'cw',
+    },
   ],
-  outputName: (name) => `${baseName(name)}-compressed.mp4`,
+  outputName: (name) => `${baseName(name)}-rotated.mp4`,
   buildArgs: (input, output, o) => [
-    '-i', input, '-c:v', 'libx264', '-preset', 'veryfast', '-crf', String(o.crf), '-c:a', 'aac', '-b:a', '128k', output,
+    '-i', input, '-vf', ROTATE_FILTERS[String(o.how)] ?? ROTATE_FILTERS.cw,
+    '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-c:a', 'copy', output,
   ],
 }
 
-export const editFeatures: Feature[] = [screenshot, compress]
+export const editFeatures: Feature[] = [trim, rotate]

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { fileKind, unavailableReason } from '../src/features/accepts'
 import { extractAudio } from '../src/features/audio'
-import { screenshot } from '../src/features/edit'
+import { screenshot } from '../src/features/images'
 import { firstError, validateOption } from '../src/features/options'
 
 const video = { name: 'a.mp4', type: 'video/mp4' }

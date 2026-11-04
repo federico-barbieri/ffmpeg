@@ -5,7 +5,8 @@ import { ButtonGrid } from './components/ButtonGrid'
 import { OptionsPanel } from './components/OptionsPanel'
 import { features } from './features/registry'
 import { defaultValues } from './features/options'
-import { CancelledError, EngineError, cancel, run, type RunResult } from './ffmpeg/engine'
+import { CancelledError, EngineError, cancel, probe, run, type RunResult } from './ffmpeg/engine'
+import { parseInfo, summarize, toRows, type MediaInfo } from './ffmpeg/probe'
 import type { Feature, OptionValues } from './features/types'
 
 type State =
@@ -13,6 +14,7 @@ type State =
   | { phase: 'loading' }
   | { phase: 'running'; progress: number | null }
   | { phase: 'done'; result: RunResult; url: string }
+  | { phase: 'info'; info: MediaInfo | null; log: string[] }
   | { phase: 'error'; message: string; log: string[] }
 
 export default function App() {
@@ -20,7 +22,23 @@ export default function App() {
   const [state, setState] = useState<State>({ phase: 'idle' })
   const [selected, setSelected] = useState<Feature | null>(null)
   const [values, setValues] = useState<OptionValues>({})
-  const working = state.phase === 'loading' || state.phase === 'running'
+  const [summary, setSummary] = useState('')
+  const [probing, setProbing] = useState(false)
+  const working = probing || state.phase === 'loading' || state.phase === 'running'
+
+  /** Read duration/resolution of a newly chosen file (best effort: failures are silent). */
+  async function choose(f: File) {
+    setFile(f)
+    setSummary('')
+    setState({ phase: 'idle' })
+    setProbing(true)
+    try {
+      const info = parseInfo(await probe(f, () => setState({ phase: 'loading' })))
+      setSummary(info ? summarize(info) : '')
+    } catch { /* the buttons still work; the summary is a nice-to-have */ }
+    setState((s) => (s.phase === 'loading' ? { phase: 'idle' } : s))
+    setProbing(false)
+  }
 
   useEffect(() => () => { if (state.phase === 'done') URL.revokeObjectURL(state.url) }, [state])
 
@@ -33,6 +51,7 @@ export default function App() {
         (p) => setState({ phase: 'running', progress: p }),
         () => setState({ phase: 'loading' }),
       )
+      if (!result.blob) return setState({ phase: 'info', info: parseInfo(result.log), log: result.log })
       setState({ phase: 'done', result, url: URL.createObjectURL(result.blob) })
     } catch (e) {
       if (e instanceof CancelledError) return setState({ phase: 'idle' })
@@ -44,7 +63,7 @@ export default function App() {
   return (
     <main>
       <h1>FFmpeg Buttons</h1>
-      <DropZone file={file} onFile={(f) => { setFile(f); setState({ phase: 'idle' }) }} disabled={working} />
+      <DropZone file={file} onFile={choose} disabled={working} summary={summary} />
 
       <ButtonGrid
         features={features}
@@ -72,7 +91,19 @@ export default function App() {
           <details><summary>Technical details</summary><pre>{state.log.join('\n')}</pre></details>
         </div>
       )}
-      {state.phase === 'done' && (
+      {state.phase === 'info' && (
+        <div className="result">
+          {state.info ? (
+            <table className="info">
+              <tbody>{toRows(state.info).map(([k, v]) => <tr key={k}><th>{k}</th><td>{v}</td></tr>)}</tbody>
+            </table>
+          ) : (
+            <p>This file seems damaged or isn't a video, audio or image file.</p>
+          )}
+          <details><summary>Technical details</summary><pre>{state.log.join('\n')}</pre></details>
+        </div>
+      )}
+      {state.phase === 'done' && state.result.blob && (
         <div className="result">
           <strong>{state.result.outputName}</strong> · {formatSize(state.result.blob.size)}
           {state.result.blob.type.startsWith('audio/') && <audio controls src={state.url} />}

@@ -1,4 +1,4 @@
-import { FFmpeg } from '@ffmpeg/ffmpeg'
+import { FFFSType, FFmpeg } from '@ffmpeg/ffmpeg'
 import { fetchFile } from '@ffmpeg/util'
 // The core is bundled from node_modules (no CDN): Vite serves/emits these as same-origin assets.
 import coreURL from '@ffmpeg/core?url'
@@ -23,7 +23,8 @@ export class EngineError extends Error {
 }
 
 export interface RunResult {
-  blob: Blob
+  blob: Blob | null // null for features without an output file (File info)
+  log: string[]
   outputName: string
   args: string[] // args using the virtual file names
 }
@@ -107,12 +108,13 @@ export async function run(
     await ff.writeFile(input, await fetchFile(file))
     const code = await ff.exec(args)
     if (cancelled) throw new CancelledError()
+    if (feature.noOutput) return { blob: null, log: getLog(), outputName, args } // non-zero exit is expected
     if (code !== 0) throw new EngineError(`ffmpeg exited with code ${code}`, getLog())
     const data = await ff.readFile(output)
     const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : data
     // Copy into a fresh buffer: the original may be backed by memory ffmpeg is about to reuse.
     const blob = new Blob([new Uint8Array(bytes)], { type: MIME[extOf(output)] ?? 'application/octet-stream' })
-    return { blob, outputName, args }
+    return { blob, log: getLog(), outputName, args }
   } catch (e) {
     if (cancelled) throw new CancelledError()
     if (e instanceof EngineError) throw e
@@ -121,9 +123,40 @@ export async function run(
     // Free the virtual FS (memory is tight). Skip if the instance was terminated.
     if (ff && !cancelled) {
       await ff.deleteFile(input).catch(() => {})
-      await ff.deleteFile(output).catch(() => {})
+      if (!feature.noOutput) await ff.deleteFile(output).catch(() => {})
     }
     progressCb = null
+    busy = false
+  }
+}
+
+/**
+ * Quick look at a file (`ffmpeg -i`) and return the log. The file is mounted read-only
+ * (WORKERFS) instead of copied, so even a huge file costs no memory. Counts as a job.
+ */
+export async function probe(file: File, onLoading?: () => void): Promise<string[]> {
+  if (busy) throw new Error('Another job is already running')
+  busy = true
+  cancelled = false
+  logLines = []
+  progressCb = null
+  let ff: FFmpeg | null = null
+  const dir = '/probe'
+  try {
+    if (!ffmpeg?.loaded) onLoading?.()
+    ff = await getFFmpeg()
+    await ff.createDir(dir)
+    await ff.mount(FFFSType.WORKERFS, { files: [file] }, dir)
+    await ff.exec(['-i', `${dir}/${file.name}`]) // exits non-zero: no output file, expected
+    return getLog()
+  } catch (e) {
+    if (cancelled) throw new CancelledError()
+    throw new EngineError(e instanceof Error ? e.message : String(e), getLog())
+  } finally {
+    if (ff && !cancelled) {
+      await ff.unmount(dir).catch(() => {})
+      await ff.deleteDir(dir).catch(() => {})
+    }
     busy = false
   }
 }

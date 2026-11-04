@@ -4,6 +4,7 @@ interface Props {
   file: File | null
   onFile: (file: File) => void
   disabled?: boolean
+  summary?: string // e.g. "0:03 · 1280×720"
 }
 
 export function formatSize(bytes: number): string {
@@ -13,7 +14,7 @@ export function formatSize(bytes: number): string {
   return `${(bytes / 1024 ** 3).toFixed(2)} GB`
 }
 
-export function DropZone({ file, onFile, disabled }: Props) {
+export function DropZone({ file, onFile, disabled, summary }: Props) {
   const input = useRef<HTMLInputElement>(null)
   const [over, setOver] = useState(false)
   const pick = (f?: File) => f && !disabled && onFile(f)
@@ -33,7 +34,7 @@ export function DropZone({ file, onFile, disabled }: Props) {
       {file ? (
         <>
           <strong>{file.name}</strong>
-          <span>{formatSize(file.size)} · click or drop to choose another file</span>
+          <span>{[formatSize(file.size), summary].filter(Boolean).join(' · ')} · click or drop to choose another file</span>
         </>
       ) : (
         <>
