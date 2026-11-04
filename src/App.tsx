@@ -1,9 +1,12 @@
 import { useEffect, useState } from 'react'
 import { DropZone, formatSize } from './components/DropZone'
 import { ProgressBar } from './components/ProgressBar'
+import { ButtonGrid } from './components/ButtonGrid'
+import { OptionsPanel } from './components/OptionsPanel'
 import { features } from './features/registry'
+import { defaultValues } from './features/options'
 import { CancelledError, EngineError, cancel, run, type RunResult } from './ffmpeg/engine'
-import type { Feature } from './features/types'
+import type { Feature, OptionValues } from './features/types'
 
 type State =
   | { phase: 'idle' }
@@ -15,16 +18,18 @@ type State =
 export default function App() {
   const [file, setFile] = useState<File | null>(null)
   const [state, setState] = useState<State>({ phase: 'idle' })
+  const [selected, setSelected] = useState<Feature | null>(null)
+  const [values, setValues] = useState<OptionValues>({})
   const working = state.phase === 'loading' || state.phase === 'running'
 
   useEffect(() => () => { if (state.phase === 'done') URL.revokeObjectURL(state.url) }, [state])
 
-  async function start(feature: Feature) {
+  async function start(feature: Feature, opts: OptionValues) {
     if (!file) return
     setState({ phase: 'loading' })
     try {
       const result = await run(
-        feature, file, {},
+        feature, file, opts,
         (p) => setState({ phase: 'running', progress: p }),
         () => setState({ phase: 'loading' }),
       )
@@ -41,14 +46,23 @@ export default function App() {
       <h1>FFmpeg Buttons</h1>
       <DropZone file={file} onFile={(f) => { setFile(f); setState({ phase: 'idle' }) }} disabled={working} />
 
-      <div className="grid">
-        {features.map((f) => (
-          <button key={f.id} className="tile" disabled={!file || working} title={f.description} onClick={() => start(f)}>
-            <span className="icon">{f.icon}</span>
-            {f.label}
-          </button>
-        ))}
-      </div>
+      <ButtonGrid
+        features={features}
+        file={file}
+        selectedId={selected?.id ?? null}
+        disabled={working}
+        onSelect={(f) => {
+          const v = defaultValues(f.options)
+          setSelected(f)
+          setValues(v)
+          setState({ phase: 'idle' })
+          if (f.options.length === 0) start(f, v) // nothing to ask: run right away
+        }}
+      />
+
+      {selected && selected.options.length > 0 && (
+        <OptionsPanel feature={selected} values={values} disabled={working} onChange={setValues} onRun={() => start(selected, values)} />
+      )}
 
       {state.phase === 'loading' && <ProgressBar value={null} label="Loading FFmpeg… (~30 MB, once)" onCancel={cancel} />}
       {state.phase === 'running' && <ProgressBar value={state.progress} onCancel={cancel} />}
@@ -62,6 +76,8 @@ export default function App() {
         <div className="result">
           <strong>{state.result.outputName}</strong> · {formatSize(state.result.blob.size)}
           {state.result.blob.type.startsWith('audio/') && <audio controls src={state.url} />}
+          {state.result.blob.type.startsWith('video/') && <video controls src={state.url} />}
+          {state.result.blob.type.startsWith('image/') && <img src={state.url} alt="Result preview" />}
           <a className="download" href={state.url} download={state.result.outputName}>Download</a>
         </div>
       )}
